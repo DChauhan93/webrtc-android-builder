@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (m130, sed-based)
+name: Build WebRTC Android AAR
 
 on:
   workflow_dispatch:
@@ -8,10 +8,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🔥 Free disk space (mandatory for WebRTC)
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -40,19 +39,15 @@ jobs:
           git checkout branch-heads/6723
           gclient sync
 
-      # 🔧 Inject native GenerateKeyFrame() (JNI)
       - name: Inject JNI GenerateKeyFrame
         run: |
           cd src
-          sed -i '/}  \/\/ namespace jni/i \
-static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_pointer) {\n  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->GenerateKeyFrame();\n}\n' sdk/android/src/jni/pc/rtp_sender.cc
+          perl -0777 -i -pe 's/}  \/\/ namespace jni/static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_pointer) {\n  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->GenerateKeyFrame();\n}\n\n}  \/\/ namespace jni/s' sdk/android/src/jni/pc/rtp_sender.cc
 
-      # 🔧 Inject Java API
       - name: Inject Java generateKeyFrame API
         run: |
           cd src
-          sed -i '/private final long nativeRtpSender;/a \
-\n  public native void nativeGenerateKeyFrame();\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame();\n  }\n' sdk/android/api/org/webrtc/RtpSender.java
+          perl -0777 -i -pe 's/private final long nativeRtpSender;/private final long nativeRtpSender;\n\n  public native void nativeGenerateKeyFrame();\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame();\n  }/s' sdk/android/api/org/webrtc/RtpSender.java
 
       - name: Build WebRTC Android AAR
         run: |
@@ -62,5 +57,5 @@ static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_point
       - name: Upload AAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: webrtc-android-6723
+          name: webrtc-android-aar
           path: src/out/android/webrtc.aar
