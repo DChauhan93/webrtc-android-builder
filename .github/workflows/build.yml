@@ -1,0 +1,45 @@
+name: Build WebRTC Android AAR (m130)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git python3 curl clang lsb-release unzip
+
+      - name: Install depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch WebRTC Android source
+        run: |
+          fetch --nohooks webrtc_android
+          cd webrtc/src
+          git checkout branch-heads/6723
+          gclient sync
+
+      - name: Apply patches
+        run: |
+          cd webrtc/src
+          git apply ../../patches/*.patch
+
+      - name: Build WebRTC Android AAR
+        run: |
+          cd webrtc/src
+          tools_webrtc/android/build_aar.py
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-android-6723
+          path: webrtc/src/out/android/webrtc.aar
