@@ -1,0 +1,66 @@
+name: Build WebRTC Android AAR (m130, sed-based)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 🔥 Free disk space (mandatory for WebRTC)
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/share/swift
+          sudo apt clean
+          df -h
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git python3 curl clang lsb-release unzip
+
+      - name: Install depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch WebRTC Android source
+        run: |
+          fetch --nohooks webrtc_android
+          cd src
+          git checkout branch-heads/6723
+          gclient sync
+
+      # 🔧 Inject native GenerateKeyFrame() (JNI)
+      - name: Inject JNI GenerateKeyFrame
+        run: |
+          cd src
+          sed -i '/}  \/\/ namespace jni/i \
+static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_pointer) {\n  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->GenerateKeyFrame();\n}\n' sdk/android/src/jni/pc/rtp_sender.cc
+
+      # 🔧 Inject Java API
+      - name: Inject Java generateKeyFrame API
+        run: |
+          cd src
+          sed -i '/private final long nativeRtpSender;/a \
+\n  public native void nativeGenerateKeyFrame();\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame();\n  }\n' sdk/android/api/org/webrtc/RtpSender.java
+
+      - name: Build WebRTC Android AAR
+        run: |
+          cd src
+          tools_webrtc/android/build_aar.py
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-android-6723
+          path: src/out/android/webrtc.aar
