@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Optimized)
+name: Build WebRTC Android AAR (M92 – Final)
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # HARD DISK CLEANUP (MOST IMPORTANT STEP)
+      # FREE DISK SPACE (CRITICAL)
       # -------------------------------------------------
       - name: Free maximum disk space
         run: |
@@ -36,7 +36,7 @@ jobs:
           df -h
 
       # -------------------------------------------------
-      # Force all temp data to /mnt (large disk)
+      # Force all temp data to /mnt
       # -------------------------------------------------
       - name: Prepare large temp directories
         run: |
@@ -45,19 +45,29 @@ jobs:
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # Python 3.8 (WebRTC M92 requirement)
+      # PYTHON SETUP (CRITICAL FOR M92)
+      # python  -> Python 2.7
+      # python3 -> Python 3.8
       # -------------------------------------------------
+      - name: Install Python 2.7 and Python 3.8
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python2
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 10
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 5
+          python --version
+          python3 --version
+
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
           python-version: '3.8'
 
       # -------------------------------------------------
-      # Minimal system deps only
+      # Minimal system dependencies
       # -------------------------------------------------
       - name: Install minimal system dependencies
         run: |
-          sudo apt-get update
           sudo apt-get install -y \
             git curl unzip perl \
             clang-14 ninja-build pkg-config
@@ -68,7 +78,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
 
       # -------------------------------------------------
-      # Android NDK r21e (only thing we need)
+      # Android NDK r21e
       # -------------------------------------------------
       - name: Install Android NDK r21e
         run: |
@@ -88,7 +98,7 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # Fetch WebRTC M92 into /mnt (CRITICAL)
+      # Fetch WebRTC M92 (creates /mnt/src)
       # -------------------------------------------------
       - name: Fetch WebRTC M92
         run: |
@@ -127,7 +137,7 @@ jobs:
             --jobs=1
 
       # -------------------------------------------------
-      # Java patch (single-line Perl, safe)
+      # Java API patch (single-line Perl)
       # -------------------------------------------------
       - name: Add generateKeyFrame() to Java
         run: |
@@ -143,7 +153,7 @@ jobs:
           /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # Build AAR (output to /mnt)
+      # Build AAR
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
