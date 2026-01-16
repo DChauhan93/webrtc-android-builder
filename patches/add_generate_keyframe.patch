@@ -1,0 +1,33 @@
+diff --git a/sdk/android/src/jni/pc/rtp_sender.cc b/sdk/android/src/jni/pc/rtp_sender.cc
+index 0c3a41d..b1f9a44 100644
+--- a/sdk/android/src/jni/pc/rtp_sender.cc
++++ b/sdk/android/src/jni/pc/rtp_sender.cc
+@@ -133,6 +133,14 @@ static jni_zero::ScopedJavaLocalRef<jstring> JNI_RtpSender_GetMediaType(
+   return media_type == cricket::MEDIA_TYPE_AUDIO
+              ? NativeToJavaString(jni, "audio")
+              : NativeToJavaString(jni, "video");
+ }
++
++static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni,
++                                           jlong j_rtp_sender_pointer) {
++  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)
++      ->GenerateKeyFrame();
++}
++
+ }  // namespace jni
+ }  // namespace webrtc
+diff --git a/sdk/android/api/org/webrtc/RtpSender.java b/sdk/android/api/org/webrtc/RtpSender.java
+index e6d6d30..b2c71f5 100644
+--- a/sdk/android/api/org/webrtc/RtpSender.java
++++ b/sdk/android/api/org/webrtc/RtpSender.java
+@@ -78,6 +78,12 @@ public class RtpSender {
+   private final long nativeRtpSender;
+ 
++  public native void nativeGenerateKeyFrame();
++
++  public void generateKeyFrame() {
++    nativeGenerateKeyFrame();
++  }
++
+   // existing methods...
+ }
