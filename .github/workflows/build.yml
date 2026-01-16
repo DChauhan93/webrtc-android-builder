@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final Fixed)
+name: Build WebRTC Android AAR (M92 – Final Corrected)
 
 on:
   workflow_dispatch:
@@ -16,13 +16,14 @@ jobs:
       GCLIENT_HTTP_RETRY: 5
       GIT_HTTP_LOW_SPEED_LIMIT: 0
       GIT_HTTP_LOW_SPEED_TIME: 999999
+      VPYTHON_BYPASS: manually managed python not supported by chrome operations
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # FREE DISK SPACE (ABSOLUTELY REQUIRED)
+      # FREE DISK SPACE (CRITICAL)
       # -------------------------------------------------
       - name: Free disk space
         run: |
@@ -36,25 +37,23 @@ jobs:
           df -h
 
       # -------------------------------------------------
-      # FORCE ALL LARGE TEMP FILES TO /mnt
+      # PREPARE /mnt FOR LARGE BUILDS
       # -------------------------------------------------
-      - name: Prepare /mnt for large builds
+      - name: Prepare /mnt
         run: |
           sudo mkdir -p /mnt/git-tmp /mnt/build
           sudo chmod -R 777 /mnt
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # PYTHON SETUP (CRITICAL FOR M92)
-      # python  -> python2
-      # python3 -> python3.8
+      # PYTHON SETUP
+      # python3 -> for fetch + build_aar
+      # python2 -> for gclient / landmines
       # -------------------------------------------------
-      - name: Install Python 2 and force gclient to use it
+      - name: Install Python 2
         run: |
           sudo apt-get update
           sudo apt-get install -y python2
-          echo "PYTHON=/usr/bin/python2" >> $GITHUB_ENV
-          echo "VPYTHON_BYPASS=manually managed python not supported by chrome operations" >> $GITHUB_ENV
           /usr/bin/python2 --version
 
       - name: Setup Python 3.8
@@ -97,12 +96,12 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # FETCH WEBRTC M92 (CREATES /mnt/src)
+      # FETCH WEBRTC M92 (RUN FETCH WITH PYTHON 3)
       # -------------------------------------------------
       - name: Fetch WebRTC M92
         run: |
           cd /mnt
-          fetch --nohooks webrtc_android
+          python3 /mnt/depot_tools/fetch.py --nohooks webrtc_android
           cd src
           git checkout $WEBRTC_BRANCH
 
@@ -127,18 +126,18 @@ jobs:
           rm -rf /mnt/src/.gclient_previous_sync_commits
 
       # -------------------------------------------------
-      # gclient sync (SERIAL, PYTHON2, NO VPYTHON)
+      # gclient sync (EXPLICIT PYTHON 2)
       # -------------------------------------------------
-      - name: Sync WebRTC dependencies
+      - name: Sync WebRTC dependencies (Python 2)
         run: |
           cd /mnt/src
-          gclient sync \
+          PYTHON=/usr/bin/python2 gclient sync \
             --force \
             --no-history \
             --with_branch_heads \
             --with_tags \
             --jobs=1 || \
-          gclient sync \
+          PYTHON=/usr/bin/python2 gclient sync \
             --force \
             --no-history \
             --with_branch_heads \
@@ -162,7 +161,7 @@ jobs:
           /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # BUILD AAR (PYTHON3)
+      # BUILD AAR (PYTHON 3)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
