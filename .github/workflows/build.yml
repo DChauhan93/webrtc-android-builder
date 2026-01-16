@@ -1,61 +1,103 @@
-name: Build WebRTC Android AAR
+name: Build WebRTC Android AAR (M92 + Force Keyframe)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
+
+    env:
+      WEBRTC_BRANCH: branch-heads/4606
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/lib/jvm
-          sudo rm -rf /usr/share/swift
-          sudo apt clean
-          df -h
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
 
       - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt install -y git python3 curl clang lsb-release unzip
+          sudo apt-get update
+          sudo apt-get install -y \
+            git curl unzip openjdk-11-jdk \
+            clang-14 ninja-build pkg-config perl
 
-      - name: Install depot_tools
+      - name: Force clang-14
+        run: |
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
+
+      - name: Install Android NDK r21e
+        run: |
+          mkdir -p $HOME/android
+          cd $HOME/android
+          curl -LO https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+          unzip -q android-ndk-r21e-linux-x86_64.zip
+          echo "ANDROID_NDK_HOME=$HOME/android/android-ndk-r21e" >> $GITHUB_ENV
+          echo "$HOME/android/android-ndk-r21e" >> $GITHUB_PATH
+
+      - name: Fetch depot_tools
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
 
-      - name: Fetch WebRTC Android source
+      - name: Fetch WebRTC M92
         run: |
+          mkdir webrtc
+          cd webrtc
           fetch --nohooks webrtc_android
           cd src
-          git checkout branch-heads/6723
-          gclient sync
+          git checkout $WEBRTC_BRANCH
 
-      - name: Inject JNI GenerateKeyFrame
+      - name: Sync WebRTC dependencies
         run: |
-          cd src
-          perl -0777 -i -pe 's/}  \/\/ namespace jni/static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_pointer) {\n  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->GenerateKeyFrame();\n}\n\n}  \/\/ namespace jni/s' sdk/android/src/jni/pc/rtp_sender.cc
+          cd webrtc/src
+          gclient sync --force --with_branch_heads --with_tags
 
-      - name: Inject Java generateKeyFrame API
+      # -------------------------------------------------
+      # Java modification — SINGLE LINE Perl
+      # -------------------------------------------------
+      - name: Add generateKeyFrame() to Java RtpSender
         run: |
-          cd src
-          perl -0777 -i -pe 's/private final long nativeRtpSender;/private final long nativeRtpSender;\n\n  public native void nativeGenerateKeyFrame();\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame();\n  }/s' sdk/android/api/org/webrtc/RtpSender.java
+          perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  /** Forces an immediate keyframe (IDR) from the encoder. */\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
 
+      # -------------------------------------------------
+      # JNI modification — SINGLE LINE Perl
+      # -------------------------------------------------
+      - name: Add JNI nativeGenerateKeyFrame()
+        run: |
+          perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
+
+      - name: Verify modifications
+        run: |
+          grep -R "generateKeyFrame" webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
+          grep -R "nativeGenerateKeyFrame" webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
+
+      # -------------------------------------------------
+      # BUILD AAR
+      # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
-          cd src
-          tools_webrtc/android/build_aar.py
+          cd webrtc/src
+          python3 tools_webrtc/android/build_aar.py \
+            --arch armeabi-v7a \
+            --output ./out \
+            --extra-gn-args='
+              is_debug=false
+              rtc_use_h264=true
+              rtc_enable_protobuf=false
+              use_rtti=true
+              use_custom_libcxx=false
+            '
 
-      - name: Upload AAR artifact
+      - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
-          name: webrtc-android-aar
-          path: src/out/android/webrtc.aar
+          name: webrtc-m92-force-keyframe-aar
+          path: webrtc/src/out/*.aar
