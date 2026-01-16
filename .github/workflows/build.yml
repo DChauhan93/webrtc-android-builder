@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final Corrected)
+name: Build WebRTC Android AAR (M92 – Final)
 
 on:
   workflow_dispatch:
@@ -46,20 +46,14 @@ jobs:
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # PYTHON SETUP
-      # python3 -> for fetch + build_aar
-      # python2 -> for gclient / landmines
+      # INSTALL PYTHON VERSIONS
       # -------------------------------------------------
-      - name: Install Python 2
+      - name: Install Python 2.7 and Python 3.10
         run: |
           sudo apt-get update
-          sudo apt-get install -y python2
+          sudo apt-get install -y python2 python3.10
           /usr/bin/python2 --version
-
-      - name: Setup Python 3.8
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.8'
+          python3.10 --version
 
       # -------------------------------------------------
       # SYSTEM DEPENDENCIES (MINIMAL)
@@ -96,12 +90,12 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # FETCH WEBRTC M92 (RUN FETCH WITH PYTHON 3)
+      # FETCH WEBRTC M92 (FETCH WITH PYTHON 3.10)
       # -------------------------------------------------
       - name: Fetch WebRTC M92
         run: |
           cd /mnt
-          python3 /mnt/depot_tools/fetch.py --nohooks webrtc_android
+          python3.10 /mnt/depot_tools/fetch.py --nohooks webrtc_android
           cd src
           git checkout $WEBRTC_BRANCH
 
@@ -161,12 +155,12 @@ jobs:
           /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # BUILD AAR (PYTHON 3)
+      # BUILD AAR (PYTHON 3.10)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
           cd /mnt/src
-          python3 tools_webrtc/android/build_aar.py \
+          python3.10 tools_webrtc/android/build_aar.py \
             --arch armeabi-v7a \
             --output /mnt/out \
             --extra-gn-args='
