@@ -11,7 +11,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔥 REQUIRED: Free disk space (GitHub runners are too small by default)
+      # 🔥 Free disk space (required for WebRTC)
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -36,22 +36,22 @@ jobs:
       - name: Fetch WebRTC Android source
         run: |
           fetch --nohooks webrtc_android
-          cd webrtc/src
+          cd src
           git checkout branch-heads/6723
           gclient sync
 
       - name: Apply patches
         run: |
-          cd webrtc/src
-          git apply ../../patches/*.patch
+          cd src
+          git apply ../patches/*.patch
 
       - name: Build WebRTC Android AAR
         run: |
-          cd webrtc/src
+          cd src
           tools_webrtc/android/build_aar.py
 
       - name: Upload AAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-android-6723
-          path: webrtc/src/out/android/webrtc.aar
+          path: src/out/android/webrtc.aar
