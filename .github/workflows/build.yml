@@ -94,7 +94,7 @@ jobs:
         run: |
           cd /mnt
           fetch --nohooks webrtc_android
-          cd webrtc_android/src
+          cd src
           git checkout $WEBRTC_BRANCH
 
       # -------------------------------------------------
@@ -112,7 +112,7 @@ jobs:
       # -------------------------------------------------
       - name: Sync WebRTC dependencies
         run: |
-          cd /mnt/webrtc_android/src
+          cd /mnt/src
           gclient sync \
             --force \
             --no-history \
@@ -132,7 +132,7 @@ jobs:
       - name: Add generateKeyFrame() to Java
         run: |
           perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' \
-          /mnt/webrtc_android/src/sdk/android/api/org/webrtc/RtpSender.java
+          /mnt/src/sdk/android/api/org/webrtc/RtpSender.java
 
       # -------------------------------------------------
       # JNI patch (single-line Perl)
@@ -140,14 +140,14 @@ jobs:
       - name: Add JNI generateKeyFrame
         run: |
           perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' \
-          /mnt/webrtc_android/src/sdk/android/src/jni/pc/rtp_sender.cc
+          /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
       # Build AAR (output to /mnt)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
-          cd /mnt/webrtc_android/src
+          cd /mnt/src
           python3 tools_webrtc/android/build_aar.py \
             --arch armeabi-v7a \
             --output /mnt/out \
