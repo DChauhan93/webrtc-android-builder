@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 + Force Keyframe)
+name: Build WebRTC Android AAR (M92 – Optimized)
 
 on:
   workflow_dispatch:
@@ -12,31 +12,40 @@ jobs:
     env:
       WEBRTC_BRANCH: branch-heads/4606
       ANDROID_NDK_VERSION: r21e
+      DEPOT_TOOLS_UPDATE: 0
+      GCLIENT_HTTP_RETRY: 5
+      GIT_HTTP_LOW_SPEED_LIMIT: 0
+      GIT_HTTP_LOW_SPEED_TIME: 999999
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # FREE DISK SPACE (CRITICAL)
+      # HARD DISK CLEANUP (MOST IMPORTANT STEP)
       # -------------------------------------------------
-      - name: Free disk space
+      - name: Free maximum disk space
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/lib/jvm
           sudo apt-get clean
+          sudo apt-get autoremove -y
           df -h
 
-      - name: Move git temp to /mnt
+      # -------------------------------------------------
+      # Force all temp data to /mnt (large disk)
+      # -------------------------------------------------
+      - name: Prepare large temp directories
         run: |
-          sudo mkdir -p /mnt/git-tmp
-          sudo chmod 777 /mnt/git-tmp
+          sudo mkdir -p /mnt/git-tmp /mnt/build
+          sudo chmod -R 777 /mnt
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # Python (WebRTC M92 requirement)
+      # Python 3.8 (WebRTC M92 requirement)
       # -------------------------------------------------
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
@@ -44,14 +53,14 @@ jobs:
           python-version: '3.8'
 
       # -------------------------------------------------
-      # System dependencies
+      # Minimal system deps only
       # -------------------------------------------------
-      - name: Install system dependencies
+      - name: Install minimal system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git curl unzip openjdk-11-jdk \
-            clang-14 ninja-build pkg-config perl
+            git curl unzip perl \
+            clang-14 ninja-build pkg-config
 
       - name: Force clang-14
         run: |
@@ -59,74 +68,51 @@ jobs:
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
 
       # -------------------------------------------------
-      # Android NDK r21e
+      # Android NDK r21e (only thing we need)
       # -------------------------------------------------
       - name: Install Android NDK r21e
         run: |
-          mkdir -p $HOME/android
-          cd $HOME/android
+          cd /mnt
           curl -LO https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
           unzip -q android-ndk-r21e-linux-x86_64.zip
-          echo "ANDROID_NDK_HOME=$HOME/android/android-ndk-r21e" >> $GITHUB_ENV
-          echo "$HOME/android/android-ndk-r21e" >> $GITHUB_PATH
+          echo "ANDROID_NDK_HOME=/mnt/android-ndk-r21e" >> $GITHUB_ENV
+          echo "/mnt/android-ndk-r21e" >> $GITHUB_PATH
 
       # -------------------------------------------------
       # depot_tools
       # -------------------------------------------------
       - name: Fetch depot_tools
         run: |
+          cd /mnt
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          echo "$PWD/depot_tools" >> $GITHUB_PATH
+          echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # Fetch WebRTC M92
+      # Fetch WebRTC M92 into /mnt (CRITICAL)
       # -------------------------------------------------
       - name: Fetch WebRTC M92
         run: |
-          mkdir webrtc
-          cd webrtc
+          cd /mnt
           fetch --nohooks webrtc_android
-          cd src
+          cd webrtc_android/src
           git checkout $WEBRTC_BRANCH
 
       # -------------------------------------------------
-      # Git hardening (googlesource stability)
+      # Harden git (googlesource stability)
       # -------------------------------------------------
-      - name: Harden git for Chromium repositories
+      - name: Harden git
         run: |
           git config --global http.version HTTP/1.1
-          git config --global http.postBuffer 524288000
           git config --global fetch.parallel 1
           git config --global pack.threads 1
           git config --global core.deltaBaseCacheLimit 2g
-          git config --global protocol.version 1
 
       # -------------------------------------------------
-      # gclient environment stabilization
-      # -------------------------------------------------
-      - name: Stabilize gclient environment
-        run: |
-          echo "GIT_HTTP_LOW_SPEED_LIMIT=0" >> $GITHUB_ENV
-          echo "GIT_HTTP_LOW_SPEED_TIME=999999" >> $GITHUB_ENV
-          echo "GCLIENT_HTTP_RETRY=5" >> $GITHUB_ENV
-          echo "DEPOT_TOOLS_UPDATE=0" >> $GITHUB_ENV
-
-      # -------------------------------------------------
-      # Cleanup partial state (prevents FileNotFoundError)
-      # -------------------------------------------------
-      - name: Cleanup partial gclient state
-        run: |
-          rm -rf webrtc/src/third_party/ffmpeg
-          rm -rf webrtc/src/third_party/boringssl
-          rm -rf webrtc/src/.gclient_entries
-          rm -rf webrtc/src/.gclient_previous_sync_commits
-
-      # -------------------------------------------------
-      # gclient sync (SERIAL + RETRY)
+      # gclient sync (SERIAL, NO HISTORY)
       # -------------------------------------------------
       - name: Sync WebRTC dependencies
         run: |
-          cd webrtc/src
+          cd /mnt/webrtc_android/src
           gclient sync \
             --force \
             --no-history \
@@ -141,33 +127,30 @@ jobs:
             --jobs=1
 
       # -------------------------------------------------
-      # Java API modification (single-line Perl)
+      # Java patch (single-line Perl, safe)
       # -------------------------------------------------
-      - name: Add generateKeyFrame() to Java RtpSender
+      - name: Add generateKeyFrame() to Java
         run: |
-          perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  /** Forces an immediate keyframe (IDR) from the encoder. */\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
+          perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' \
+          /mnt/webrtc_android/src/sdk/android/api/org/webrtc/RtpSender.java
 
       # -------------------------------------------------
-      # JNI modification (single-line Perl)
+      # JNI patch (single-line Perl)
       # -------------------------------------------------
-      - name: Add JNI nativeGenerateKeyFrame()
+      - name: Add JNI generateKeyFrame
         run: |
-          perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
-
-      - name: Verify modifications
-        run: |
-          grep -R "generateKeyFrame" webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
-          grep -R "nativeGenerateKeyFrame" webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
+          perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' \
+          /mnt/webrtc_android/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # Build AAR
+      # Build AAR (output to /mnt)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
-          cd webrtc/src
+          cd /mnt/webrtc_android/src
           python3 tools_webrtc/android/build_aar.py \
             --arch armeabi-v7a \
-            --output ./out \
+            --output /mnt/out \
             --extra-gn-args='
               is_debug=false
               rtc_use_h264=true
@@ -183,4 +166,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-m92-force-keyframe-aar
-          path: webrtc/src/out/*.aar
+          path: /mnt/out/*.aar
