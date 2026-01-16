@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final)
+name: Build WebRTC Android AAR (M92 – Final Fixed)
 
 on:
   workflow_dispatch:
@@ -22,9 +22,9 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # FREE DISK SPACE (CRITICAL)
+      # FREE DISK SPACE (ABSOLUTELY REQUIRED)
       # -------------------------------------------------
-      - name: Free maximum disk space
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
@@ -36,9 +36,9 @@ jobs:
           df -h
 
       # -------------------------------------------------
-      # Force all temp data to /mnt
+      # FORCE ALL LARGE TEMP FILES TO /mnt
       # -------------------------------------------------
-      - name: Prepare large temp directories
+      - name: Prepare /mnt for large builds
         run: |
           sudo mkdir -p /mnt/git-tmp /mnt/build
           sudo chmod -R 777 /mnt
@@ -46,17 +46,16 @@ jobs:
 
       # -------------------------------------------------
       # PYTHON SETUP (CRITICAL FOR M92)
-      # python  -> Python 2.7
-      # python3 -> Python 3.8
+      # python  -> python2
+      # python3 -> python3.8
       # -------------------------------------------------
-      - name: Install Python 2.7 and Python 3.8
+      - name: Install Python 2 and force gclient to use it
         run: |
           sudo apt-get update
           sudo apt-get install -y python2
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 10
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3 5
-          python --version
-          python3 --version
+          echo "PYTHON=/usr/bin/python2" >> $GITHUB_ENV
+          echo "VPYTHON_BYPASS=manually managed python not supported by chrome operations" >> $GITHUB_ENV
+          /usr/bin/python2 --version
 
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
@@ -64,9 +63,9 @@ jobs:
           python-version: '3.8'
 
       # -------------------------------------------------
-      # Minimal system dependencies
+      # SYSTEM DEPENDENCIES (MINIMAL)
       # -------------------------------------------------
-      - name: Install minimal system dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get install -y \
             git curl unzip perl \
@@ -78,7 +77,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
 
       # -------------------------------------------------
-      # Android NDK r21e
+      # ANDROID NDK r21e
       # -------------------------------------------------
       - name: Install Android NDK r21e
         run: |
@@ -89,7 +88,7 @@ jobs:
           echo "/mnt/android-ndk-r21e" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # depot_tools
+      # depot_tools (MUST BE FIRST IN PATH)
       # -------------------------------------------------
       - name: Fetch depot_tools
         run: |
@@ -98,7 +97,7 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # Fetch WebRTC M92 (creates /mnt/src)
+      # FETCH WEBRTC M92 (CREATES /mnt/src)
       # -------------------------------------------------
       - name: Fetch WebRTC M92
         run: |
@@ -108,7 +107,7 @@ jobs:
           git checkout $WEBRTC_BRANCH
 
       # -------------------------------------------------
-      # Harden git (googlesource stability)
+      # HARDEN GIT (googlesource stability)
       # -------------------------------------------------
       - name: Harden git
         run: |
@@ -118,7 +117,17 @@ jobs:
           git config --global core.deltaBaseCacheLimit 2g
 
       # -------------------------------------------------
-      # gclient sync (SERIAL, NO HISTORY)
+      # CLEAN PARTIAL STATE (DEFENSIVE)
+      # -------------------------------------------------
+      - name: Cleanup partial gclient state
+        run: |
+          rm -rf /mnt/src/third_party/ffmpeg
+          rm -rf /mnt/src/third_party/boringssl
+          rm -rf /mnt/src/.gclient_entries
+          rm -rf /mnt/src/.gclient_previous_sync_commits
+
+      # -------------------------------------------------
+      # gclient sync (SERIAL, PYTHON2, NO VPYTHON)
       # -------------------------------------------------
       - name: Sync WebRTC dependencies
         run: |
@@ -137,23 +146,23 @@ jobs:
             --jobs=1
 
       # -------------------------------------------------
-      # Java API patch (single-line Perl)
+      # JAVA API PATCH (GenerateKeyFrame)
       # -------------------------------------------------
-      - name: Add generateKeyFrame() to Java
+      - name: Patch Java RtpSender
         run: |
           perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' \
           /mnt/src/sdk/android/api/org/webrtc/RtpSender.java
 
       # -------------------------------------------------
-      # JNI patch (single-line Perl)
+      # JNI PATCH
       # -------------------------------------------------
-      - name: Add JNI generateKeyFrame
+      - name: Patch JNI RtpSender
         run: |
           perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' \
           /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # Build AAR
+      # BUILD AAR (PYTHON3)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
@@ -170,7 +179,7 @@ jobs:
             '
 
       # -------------------------------------------------
-      # Upload artifact
+      # UPLOAD ARTIFACT
       # -------------------------------------------------
       - name: Upload AAR
         uses: actions/upload-artifact@v4
