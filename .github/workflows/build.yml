@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (m130)
+name: Build WebRTC Android AAR (m130, sed-based)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔥 Free disk space (required for WebRTC)
+      # 🔥 Free disk space (mandatory for WebRTC)
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -40,10 +40,19 @@ jobs:
           git checkout branch-heads/6723
           gclient sync
 
-      - name: Apply patches
+      # 🔧 Inject native GenerateKeyFrame() (JNI)
+      - name: Inject JNI GenerateKeyFrame
         run: |
           cd src
-          git apply ../patches/*.patch
+          sed -i '/}  \/\/ namespace jni/i \
+static void JNI_RtpSender_GenerateKeyFrame(JNIEnv* jni, jlong j_rtp_sender_pointer) {\n  reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->GenerateKeyFrame();\n}\n' sdk/android/src/jni/pc/rtp_sender.cc
+
+      # 🔧 Inject Java API
+      - name: Inject Java generateKeyFrame API
+        run: |
+          cd src
+          sed -i '/private final long nativeRtpSender;/a \
+\n  public native void nativeGenerateKeyFrame();\n\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame();\n  }\n' sdk/android/api/org/webrtc/RtpSender.java
 
       - name: Build WebRTC Android AAR
         run: |
