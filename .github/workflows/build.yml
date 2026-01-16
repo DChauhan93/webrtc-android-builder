@@ -11,16 +11,23 @@ jobs:
 
     env:
       WEBRTC_BRANCH: branch-heads/4606
+      ANDROID_NDK_VERSION: r21e
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ----------------------------
+      # Python (WebRTC M92 requires 3.8)
+      # ----------------------------
       - name: Setup Python 3.8
         uses: actions/setup-python@v5
         with:
           python-version: '3.8'
 
+      # ----------------------------
+      # System dependencies
+      # ----------------------------
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -33,6 +40,9 @@ jobs:
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
 
+      # ----------------------------
+      # Android NDK r21e
+      # ----------------------------
       - name: Install Android NDK r21e
         run: |
           mkdir -p $HOME/android
@@ -42,11 +52,17 @@ jobs:
           echo "ANDROID_NDK_HOME=$HOME/android/android-ndk-r21e" >> $GITHUB_ENV
           echo "$HOME/android/android-ndk-r21e" >> $GITHUB_PATH
 
+      # ----------------------------
+      # depot_tools
+      # ----------------------------
       - name: Fetch depot_tools
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "$PWD/depot_tools" >> $GITHUB_PATH
 
+      # ----------------------------
+      # Fetch WebRTC M92
+      # ----------------------------
       - name: Fetch WebRTC M92
         run: |
           mkdir webrtc
@@ -55,9 +71,9 @@ jobs:
           cd src
           git checkout $WEBRTC_BRANCH
 
-      # -------------------------------------------------
-      # CRITICAL: Git hardening for ffmpeg.git
-      # -------------------------------------------------
+      # ----------------------------
+      # HARDEN git (critical for ffmpeg / boringssl)
+      # ----------------------------
       - name: Harden git for Chromium repositories
         run: |
           git config --global http.version HTTP/1.1
@@ -65,35 +81,72 @@ jobs:
           git config --global fetch.parallel 1
           git config --global pack.threads 1
           git config --global core.deltaBaseCacheLimit 2g
+          git config --global protocol.version 1
 
-      - name: Sync WebRTC dependencies (with retry)
+      # ----------------------------
+      # Stabilize gclient / depot_tools
+      # ----------------------------
+      - name: Stabilize gclient environment
+        run: |
+          echo "GIT_HTTP_LOW_SPEED_LIMIT=0" >> $GITHUB_ENV
+          echo "GIT_HTTP_LOW_SPEED_TIME=999999" >> $GITHUB_ENV
+          echo "GCLIENT_HTTP_RETRY=5" >> $GITHUB_ENV
+          echo "DEPOT_TOOLS_UPDATE=0" >> $GITHUB_ENV
+
+      # ----------------------------
+      # Cleanup partial state (prevents FileNotFoundError)
+      # ----------------------------
+      - name: Cleanup partial gclient state
+        run: |
+          rm -rf webrtc/src/third_party/ffmpeg
+          rm -rf webrtc/src/third_party/boringssl
+          rm -rf webrtc/src/.gclient_entries
+          rm -rf webrtc/src/.gclient_previous_sync_commits
+
+      # ----------------------------
+      # gclient sync (SERIAL, RETRIED)
+      # ----------------------------
+      - name: Sync WebRTC dependencies (robust)
         run: |
           cd webrtc/src
-          gclient sync --force --with_branch_heads --with_tags --no-history || \
-          gclient sync --force --with_branch_heads --with_tags --no-history
+          gclient sync \
+            --force \
+            --no-history \
+            --with_branch_heads \
+            --with_tags \
+            --jobs=1 || \
+          gclient sync \
+            --force \
+            --no-history \
+            --with_branch_heads \
+            --with_tags \
+            --jobs=1
 
-      # -------------------------------------------------
+      # ----------------------------
       # Java API modification (single-line Perl)
-      # -------------------------------------------------
+      # ----------------------------
       - name: Add generateKeyFrame() to Java RtpSender
         run: |
           perl -0777 -i -pe 's|(private RtpSender\\(long nativeRtpSender\\)\\s*\\{\\s*this\\.nativeRtpSender = nativeRtpSender;\\s*\\})|$1\n\n  /** Forces an immediate keyframe (IDR) from the encoder. */\n  public void generateKeyFrame() {\n    nativeGenerateKeyFrame(nativeRtpSender);\n  }\n\n  private static native void nativeGenerateKeyFrame(long nativeRtpSender);\n|s unless /generateKeyFrame\\s*\\(/' webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
 
-      # -------------------------------------------------
+      # ----------------------------
       # JNI modification (single-line Perl)
-      # -------------------------------------------------
+      # ----------------------------
       - name: Add JNI nativeGenerateKeyFrame()
         run: |
           perl -0777 -i -pe 's|(#include "sdk/android/src/jni/pc/rtp_sender_jni.h"\\n)|$1\nJNI_FUNCTION_DECLARATION(void, RtpSender_nativeGenerateKeyFrame, JNIEnv*, jclass, jlong native_rtp_sender) {\n  auto* sender = reinterpret_cast<webrtc::RtpSenderInterface*>(native_rtp_sender);\n  sender->GenerateKeyFrame();\n}\n\n|s unless /nativeGenerateKeyFrame/' webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
 
+      # ----------------------------
+      # Verify edits
+      # ----------------------------
       - name: Verify modifications
         run: |
           grep -R "generateKeyFrame" webrtc/src/sdk/android/api/org/webrtc/RtpSender.java
           grep -R "nativeGenerateKeyFrame" webrtc/src/sdk/android/src/jni/pc/rtp_sender.cc
 
-      # -------------------------------------------------
-      # BUILD AAR
-      # -------------------------------------------------
+      # ----------------------------
+      # Build AAR
+      # ----------------------------
       - name: Build WebRTC Android AAR
         run: |
           cd webrtc/src
@@ -108,6 +161,9 @@ jobs:
               use_custom_libcxx=false
             '
 
+      # ----------------------------
+      # Upload artifact
+      # ----------------------------
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
