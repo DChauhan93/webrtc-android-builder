@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final)
+name: Build WebRTC Android AAR (M92 – Final Stable)
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # FREE DISK SPACE (CRITICAL)
+      # 1. FREE DISK SPACE (MUST BE FIRST)
       # -------------------------------------------------
       - name: Free disk space
         run: |
@@ -37,7 +37,7 @@ jobs:
           df -h
 
       # -------------------------------------------------
-      # PREPARE /mnt FOR LARGE BUILDS
+      # 2. PREPARE /mnt FOR LARGE OPERATIONS
       # -------------------------------------------------
       - name: Prepare /mnt
         run: |
@@ -46,7 +46,7 @@ jobs:
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # INSTALL PYTHON VERSIONS
+      # 3. INSTALL PYTHON 2.7 AND PYTHON 3.10
       # -------------------------------------------------
       - name: Install Python 2.7 and Python 3.10
         run: |
@@ -56,7 +56,7 @@ jobs:
           python3.10 --version
 
       # -------------------------------------------------
-      # SYSTEM DEPENDENCIES (MINIMAL)
+      # 4. SYSTEM DEPENDENCIES
       # -------------------------------------------------
       - name: Install system dependencies
         run: |
@@ -70,7 +70,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100
 
       # -------------------------------------------------
-      # ANDROID NDK r21e
+      # 5. ANDROID NDK r21e
       # -------------------------------------------------
       - name: Install Android NDK r21e
         run: |
@@ -81,7 +81,7 @@ jobs:
           echo "/mnt/android-ndk-r21e" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # depot_tools (MUST BE FIRST IN PATH)
+      # 6. depot_tools (FIRST IN PATH)
       # -------------------------------------------------
       - name: Fetch depot_tools
         run: |
@@ -90,9 +90,9 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # FETCH WEBRTC M92 (FETCH WITH PYTHON 3.10)
+      # 7. FETCH WEBRTC WITH PYTHON 3.10 ONLY
       # -------------------------------------------------
-      - name: Fetch WebRTC M92
+      - name: Fetch WebRTC M92 (python3.10)
         run: |
           cd /mnt
           python3.10 /mnt/depot_tools/fetch.py --nohooks webrtc_android
@@ -100,7 +100,7 @@ jobs:
           git checkout $WEBRTC_BRANCH
 
       # -------------------------------------------------
-      # HARDEN GIT (googlesource stability)
+      # 8. HARDEN GIT (NETWORK STABILITY)
       # -------------------------------------------------
       - name: Harden git
         run: |
@@ -110,7 +110,16 @@ jobs:
           git config --global core.deltaBaseCacheLimit 2g
 
       # -------------------------------------------------
-      # CLEAN PARTIAL STATE (DEFENSIVE)
+      # 9. FORCE python -> python2 FOR gclient
+      # -------------------------------------------------
+      - name: Force python to Python 2 for gclient
+        run: |
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 100
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.10 10
+          python --version
+
+      # -------------------------------------------------
+      # 10. CLEAN PARTIAL STATE (DEFENSIVE)
       # -------------------------------------------------
       - name: Cleanup partial gclient state
         run: |
@@ -120,18 +129,18 @@ jobs:
           rm -rf /mnt/src/.gclient_previous_sync_commits
 
       # -------------------------------------------------
-      # gclient sync (EXPLICIT PYTHON 2)
+      # 11. gclient sync (RUNS UNDER PYTHON 2)
       # -------------------------------------------------
-      - name: Sync WebRTC dependencies (Python 2)
+      - name: Sync WebRTC dependencies (python2)
         run: |
           cd /mnt/src
-          PYTHON=/usr/bin/python2 gclient sync \
+          gclient sync \
             --force \
             --no-history \
             --with_branch_heads \
             --with_tags \
             --jobs=1 || \
-          PYTHON=/usr/bin/python2 gclient sync \
+          gclient sync \
             --force \
             --no-history \
             --with_branch_heads \
@@ -139,7 +148,7 @@ jobs:
             --jobs=1
 
       # -------------------------------------------------
-      # JAVA API PATCH (GenerateKeyFrame)
+      # 12. JAVA API PATCH (GenerateKeyFrame)
       # -------------------------------------------------
       - name: Patch Java RtpSender
         run: |
@@ -147,7 +156,7 @@ jobs:
           /mnt/src/sdk/android/api/org/webrtc/RtpSender.java
 
       # -------------------------------------------------
-      # JNI PATCH
+      # 13. JNI PATCH
       # -------------------------------------------------
       - name: Patch JNI RtpSender
         run: |
@@ -155,7 +164,7 @@ jobs:
           /mnt/src/sdk/android/src/jni/pc/rtp_sender.cc
 
       # -------------------------------------------------
-      # BUILD AAR (PYTHON 3.10)
+      # 14. BUILD AAR (EXPLICIT PYTHON 3.10)
       # -------------------------------------------------
       - name: Build WebRTC Android AAR
         run: |
@@ -172,7 +181,7 @@ jobs:
             '
 
       # -------------------------------------------------
-      # UPLOAD ARTIFACT
+      # 15. UPLOAD ARTIFACT
       # -------------------------------------------------
       - name: Upload AAR
         uses: actions/upload-artifact@v4
