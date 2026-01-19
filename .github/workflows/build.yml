@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final Clean)
+name: Build WebRTC Android AAR (M92 – Final Definitive)
 
 on:
   workflow_dispatch:
@@ -17,6 +17,7 @@ jobs:
       GIT_HTTP_LOW_SPEED_LIMIT: 0
       GIT_HTTP_LOW_SPEED_TIME: 999999
       VPYTHON_BYPASS: manually managed python not supported by chrome operations
+      GCLIENT_SKIP_INSTRUMENTED_LIBRARIES: 1
 
     steps:
       - name: Checkout repo
