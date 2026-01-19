@@ -1,4 +1,4 @@
-name: Build WebRTC Android AAR (M92 – Final Definitive)
+name: Build WebRTC Android AAR (M92 – Definitive)
 
 on:
   workflow_dispatch:
@@ -17,14 +17,13 @@ jobs:
       GIT_HTTP_LOW_SPEED_LIMIT: 0
       GIT_HTTP_LOW_SPEED_TIME: 999999
       VPYTHON_BYPASS: manually managed python not supported by chrome operations
-      GCLIENT_SKIP_INSTRUMENTED_LIBRARIES: 1
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       # -------------------------------------------------
-      # 1. FREE DISK SPACE (CRITICAL)
+      # 1. FREE DISK SPACE (REQUIRED)
       # -------------------------------------------------
       - name: Free disk space
         run: |
@@ -38,18 +37,18 @@ jobs:
           df -h
 
       # -------------------------------------------------
-      # 2. PREPARE /mnt FOR LARGE OPERATIONS
+      # 2. PREPARE /mnt
       # -------------------------------------------------
       - name: Prepare /mnt
         run: |
-          sudo mkdir -p /mnt/git-tmp /mnt/build
+          sudo mkdir -p /mnt/git-tmp
           sudo chmod -R 777 /mnt
           git config --global core.tmpdir /mnt/git-tmp
 
       # -------------------------------------------------
-      # 3. INSTALL PYTHON 2.7 AND PYTHON 3.10
+      # 3. INSTALL PYTHON 2.7 + PYTHON 3.10
       # -------------------------------------------------
-      - name: Install Python 2.7 and Python 3.10
+      - name: Install Python runtimes
         run: |
           sudo apt-get update
           sudo apt-get install -y python2 python3.10
@@ -91,17 +90,33 @@ jobs:
           echo "/mnt/depot_tools" >> $GITHUB_PATH
 
       # -------------------------------------------------
-      # 7. FETCH WEBRTC (PYTHON 3.10 ONLY)
+      # 7. FETCH WEBRTC + CREATE .gclient (MSAN DISABLED)
       # -------------------------------------------------
-      - name: Fetch WebRTC M92
+      - name: Fetch WebRTC M92 (python3.10, MSAN disabled)
         run: |
           cd /mnt
+
           python3.10 /mnt/depot_tools/fetch.py --nohooks webrtc_android
+
+          cat > .gclient <<'EOF'
+solutions = [
+  {
+    "name": "src",
+    "url": "https://webrtc.googlesource.com/src.git",
+    "deps_file": "DEPS",
+    "managed": False,
+    "custom_vars": {
+      "checkout_instrumented_libraries": False,
+    },
+  },
+]
+EOF
+
           cd src
           git checkout $WEBRTC_BRANCH
 
       # -------------------------------------------------
-      # 8. HARDEN GIT
+      # 8. NETWORK HARDENING
       # -------------------------------------------------
       - name: Harden git
         run: |
@@ -130,7 +145,7 @@ jobs:
           rm -rf /mnt/src/.gclient_previous_sync_commits
 
       # -------------------------------------------------
-      # 11. gclient sync (PYTHON 2 + -D)
+      # 11. gclient sync (PYTHON 2)
       # -------------------------------------------------
       - name: Sync WebRTC dependencies
         run: |
@@ -140,15 +155,13 @@ jobs:
             --no-history \
             --with_branch_heads \
             --with_tags \
-            --jobs=1 \
-            -D || \
+            --jobs=1 || \
           gclient sync \
             --force \
             --no-history \
             --with_branch_heads \
             --with_tags \
-            --jobs=1 \
-            -D
+            --jobs=1
 
       # -------------------------------------------------
       # 12. JAVA API PATCH (GenerateKeyFrame)
